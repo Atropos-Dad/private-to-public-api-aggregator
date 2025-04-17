@@ -1,0 +1,10 @@
+[package]
+name = "API-Agg-For-Static"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tide = "0.16.0"
+async-std = { version = "1.12.0", features = ["attributes"] }
+dotenv = "0.15.0"
+rand = "0.9.1"
