@@ -11,7 +11,24 @@ mod cache;
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
-    dotenv().ok();
+    // Load .env file and report result
+    match dotenv() {
+        Ok(_) => log::info!("Successfully loaded .env file"),
+        Err(e) => log::warn!("Failed to load .env file: {}", e),
+    };
+    
+    // Print current working directory for debugging
+    match std::env::current_dir() {
+        Ok(dir) => log::info!("Current working directory: {}", dir.display()),
+        Err(e) => log::warn!("Failed to get current directory: {}", e),
+    }
+    
+    // Check for critical environment variables
+    let api_key = env::var("API_KEY").unwrap_or_else(|_| {
+        log::warn!("API_KEY not set in environment");
+        "missing".to_string()
+    });
+    log::info!("API_KEY is {}", if api_key != "missing" { "set" } else { "missing" });
     
     // Set log level based on environment (default to Info for production)
     let log_level = match env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()).as_str() {
@@ -28,6 +45,7 @@ async fn main() -> tide::Result<()> {
     // Get host and port from environment variables or use defaults
     let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let port = env::var("PORT").unwrap_or_else(|_| "4653".to_string());
+    log::info!("Using HOST={} and PORT={}", host, port);
     
     app.at("/").get(|_| async { Ok("API Endpoint Aggregator") });
     app.at("/url-webhook").post(url_handlers::log_url);
