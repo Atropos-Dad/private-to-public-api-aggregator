@@ -28,7 +28,7 @@ pub async fn get_aggregated_data(req: Request<()>) -> tide::Result<Response> {
     let spotify_limit = req.url().query_pairs()
         .find(|(k, _)| k == "limit")
         .and_then(|(_, v)| v.parse::<usize>().ok())
-        .unwrap_or(5);
+        .unwrap_or(6);
         
     let no_cache = req.url().query_pairs()
         .find(|(k, _)| k == "no_cache")
