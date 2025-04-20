@@ -33,6 +33,10 @@ async fn main() -> tide::Result<()> {
     });
     log::info!("API_KEY is {}", if api_key != "missing" { "set" } else { "missing" });
     
+        
+    let allowed_origin = env::var("ALLOWED_ORIGIN").unwrap_or_else(|_| "https://jeaic.com".to_string());
+    log::info!("ALLOWED_ORIGIN is {}", allowed_origin);
+
     // Set log level based on environment (default to Info for production)
     let log_level = match env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()).as_str() {
         "debug" => LevelFilter::Debug,
@@ -45,7 +49,8 @@ async fn main() -> tide::Result<()> {
     
     let mut app = tide::new();
     let cors = CorsMiddleware::new()
-        .allow_origin(Origin::Any)
+        // .allow_origin(Origin::Any)
+        .allow_origin(Origin::Exact(allowed_origin))
         .allow_methods("GET, POST, OPTIONS".parse::<HeaderValue>().unwrap())
         .allow_credentials(false);
     app.with(cors);
