@@ -2,12 +2,15 @@ use tide::{log, prelude::*};
 use dotenv::dotenv;
 use femme::LevelFilter;
 use std::env;
+use tide::security::{CorsMiddleware, Origin};
+use http_types::headers::HeaderValue;
 
 mod url_handlers;
 mod auth;
 mod letterboxd;
 mod spotify;
 mod cache;
+mod aggregator;
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
@@ -41,6 +44,11 @@ async fn main() -> tide::Result<()> {
     tide::log::with_level(log_level);
     
     let mut app = tide::new();
+    let cors = CorsMiddleware::new()
+        .allow_origin(Origin::Any)
+        .allow_methods("GET, POST, OPTIONS".parse::<HeaderValue>().unwrap())
+        .allow_credentials(false);
+    app.with(cors);
     
     // Get host and port from environment variables or use defaults
     let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
@@ -52,6 +60,7 @@ async fn main() -> tide::Result<()> {
     app.at("/url-webhook").get(url_handlers::get_urls);
     app.at("/letterboxd").get(letterboxd::get_letterboxd_movies);
     app.at("/spotify").get(spotify::get_spotify_tracks);
+    app.at("/aggregated").get(aggregator::get_aggregated_data);
     
     log::info!("Server running on http://{}:{}", host, port);
     app.listen(format!("{}:{}", host, port)).await?;

@@ -21,7 +21,7 @@ static REFRESH_TOKEN: LazyLock<String> = LazyLock::new(|| {
 });
 
 const CACHE_DURATION_SECS: u64 = 900; // 15 minutes
-const NUMBER_OF_TRACKS_TO_SHOW: usize = 5;
+const NUMBER_OF_TRACKS_TO_SHOW: usize = 6;
 
 // Cache structure to store access token and timestamp
 #[derive(Debug, Clone)]

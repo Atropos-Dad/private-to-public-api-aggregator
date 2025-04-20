@@ -24,7 +24,7 @@ A Rust-based API aggregator that provides endpoints for Spotify recently played 
 
 ## API Endpoints
 
-All endpoints require authentication with the API key in the Authorization header:
+All endpoints except `/aggregated` require authentication with the API key in the Authorization header:
 ```
 Authorization: Bearer your_api_key_here
 ```
@@ -112,6 +112,52 @@ Returns the most recently played tracks from Spotify.
 Response Format:
 ```json
 {
+  "tracks": [
+    {
+      "track_name": "Track Name",
+      "artist": "Artist Name",
+      "album_name": "Album Name",
+      "played_at": "2023-01-01T12:00:00Z",
+      "spotify_url": "https://open.spotify.com/track/id",
+      "album_image_url": "https://i.scdn.co/image/id"
+    },
+    ...
+  ]
+}
+```
+
+### Aggregated Endpoint
+
+#### GET /aggregated
+Returns data from all three sources (URLs, Letterboxd movies, and Spotify tracks) in a single response. This endpoint does not require authentication.
+
+**Request:**
+- Method: GET
+- No authentication required
+- Query Parameters:
+  - `feed_url` (optional): URL of the Letterboxd RSS feed (default: https://letterboxd.com/atropos_Dad/rss)
+  - `limit` (optional): Number of Spotify tracks to return (default: 5)
+  - `no_cache` (optional): Set to "true" to bypass cache
+
+**Response:**
+- 200 OK: JSON containing all aggregated data
+
+Response Format:
+```json
+{
+  "urls": ["url1", "url2", "url3", "url4", "url5"],
+  "movies": [
+    {
+      "title": "Movie Title with Rating",
+      "link": "https://letterboxd.com/user/film/movie-slug/",
+      "description": "Review text",
+      "pub_date": "Wed, 01 Jan 2023 12:00:00 +0000",
+      "film_title": "Movie Title",
+      "rating": "3.5",
+      "rewatch": "true"
+    },
+    ...
+  ],
   "tracks": [
     {
       "track_name": "Track Name",

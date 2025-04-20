@@ -11,6 +11,7 @@ dependencies = [
  "chrono",
  "dotenv",
  "femme",
+ "http-types",
  "rand 0.9.1",
  "rss",
  "serde",
