@@ -20,6 +20,15 @@ static REFRESH_TOKEN: LazyLock<String> = LazyLock::new(|| {
     std::env::var("SPOTIFY_REFRESH_TOKEN").expect("SPOTIFY_REFRESH_TOKEN must be set.")
 });
 
+static EXCLUDED_GENRES: LazyLock<Vec<String>> = LazyLock::new(|| {
+    std::env::var("SPOTIFY_EXCLUDED_GENRES")
+        .unwrap_or_else(|_| "comedy".to_string())
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim().to_lowercase())
+        .collect()
+});
+
 const CACHE_DURATION_SECS: u64 = 900; // 15 minutes
 const NUMBER_OF_TRACKS_TO_SHOW: usize = 6;
 
@@ -55,6 +64,7 @@ pub struct SpotifyTrack {
     pub played_at: String,
     pub spotify_url: String,
     pub album_image_url: Option<String>,
+    pub genres: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +95,7 @@ struct TrackObject {
     album: AlbumObject,
     artists: Vec<ArtistObject>,
     external_urls: ExternalUrls,
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +107,7 @@ struct AlbumObject {
 #[derive(Debug, Deserialize)]
 struct ArtistObject {
     name: String,
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,6 +122,57 @@ struct ImageObject {
 #[derive(Debug, Deserialize)]
 struct ExternalUrls {
     spotify: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FullArtistObject {
+    id: String,
+    name: String,
+    genres: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtistsResponse {
+    artists: Vec<FullArtistObject>,
+}
+
+async fn get_artists_with_genres(artist_ids: Vec<String>, access_token: &str) -> Result<HashMap<String, Vec<String>>, String> {
+    if artist_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    
+    let start_time = Instant::now();
+    
+    // Spotify API allows up to 50 artists per request
+    let mut all_genres = HashMap::new();
+    
+    for chunk in artist_ids.chunks(50) {
+        let ids = chunk.join(",");
+        let mut response = surf::get(format!("https://api.spotify.com/v1/artists?ids={}", ids))
+            .header("Authorization", format!("Bearer {}", access_token))
+            .await
+            .map_err(|e| format!("Failed to make request to Spotify Artists API: {}", e))?;
+        
+        if response.status().is_success() {
+            let artists_response: ArtistsResponse = response.body_json()
+                .await
+                .map_err(|e| format!("Failed to parse artists response: {}", e))?;
+            
+            for artist in artists_response.artists {
+                all_genres.insert(artist.id, artist.genres);
+            }
+        } else {
+            let error_text = response.body_string()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            log::error!("Failed to get artist genres: {} - {}", response.status(), error_text);
+        }
+    }
+    
+    let total_time = start_time.elapsed();
+    log::info!("Fetched genres for {} artists in {:?}", artist_ids.len(), total_time);
+    
+    Ok(all_genres)
 }
 
 async fn get_access_token() -> Result<String, String> {
@@ -189,7 +252,9 @@ pub async fn get_recently_played(limit: usize) -> Result<Vec<SpotifyTrack>, Stri
             if let Ok(elapsed) = cache_entry.timestamp.elapsed() {
                 if elapsed < Duration::from_secs(CACHE_DURATION_SECS) {
                     log::info!("Recently played tracks cache hit");
-                    return Ok(cache_entry.tracks.clone());
+                    // Return limited results from cache
+                    let limited_tracks = cache_entry.tracks.iter().take(limit).cloned().collect();
+                    return Ok(limited_tracks);
                 } else {
                     log::info!("Recently played tracks cache expired");
                 }
@@ -202,8 +267,12 @@ pub async fn get_recently_played(limit: usize) -> Result<Vec<SpotifyTrack>, Stri
     // Get access token
     let access_token = get_access_token().await?;
     
+    // Fetch more tracks than needed to account for filtering
+    // Spotify API max is 50, so we'll use that to maximize our chances of getting enough tracks after filtering
+    let fetch_limit = 25;
+    
     // Make request to Spotify API
-    let mut response = surf::get(format!("https://api.spotify.com/v1/me/player/recently-played?limit={}", limit))
+    let mut response = surf::get(format!("https://api.spotify.com/v1/me/player/recently-played?limit={}", fetch_limit))
         .header("Authorization", format!("Bearer {}", access_token))
         .await
         .map_err(|e| format!("Failed to make request to Spotify API: {}", e))?;
@@ -214,19 +283,60 @@ pub async fn get_recently_played(limit: usize) -> Result<Vec<SpotifyTrack>, Stri
             .await
             .map_err(|e| format!("Failed to parse response: {}", e))?;
         
-        // Transform response to simplified format
-        let tracks: Vec<SpotifyTrack> = recently_played.items.iter().map(|item| {
-            SpotifyTrack {
-                track_name: item.track.name.clone(),
-                artist: item.track.artists.first().map(|artist| artist.name.clone()).unwrap_or_default(),
-                album_name: item.track.album.name.clone(),
-                played_at: item.played_at.clone(),
-                spotify_url: item.track.external_urls.spotify.clone(),
-                album_image_url: item.track.album.images.first().map(|image| image.url.clone()),
-            }
-        }).collect();
+        // Get unique artist IDs
+        let artist_ids: Vec<String> = recently_played.items.iter()
+            .flat_map(|item| item.track.artists.iter().map(|artist| artist.id.clone()))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
         
-        // Update cache
+        // Fetch artist genres
+        let artist_genres = get_artists_with_genres(artist_ids, &access_token).await?;
+        
+        // Transform response to simplified format with genres
+        let mut tracks: Vec<SpotifyTrack> = Vec::new();
+        
+        for item in recently_played.items.iter() {
+            // Get all genres from all artists on the track
+            let mut track_genres: Vec<String> = Vec::new();
+            for artist in &item.track.artists {
+                if let Some(genres) = artist_genres.get(&artist.id) {
+                    track_genres.extend(genres.clone());
+                }
+            }
+            
+            // Remove duplicates
+            track_genres.sort();
+            track_genres.dedup();
+            
+            // Check if any of the track's genres are in the excluded list
+            let should_exclude = if !EXCLUDED_GENRES.is_empty() {
+                track_genres.iter().any(|genre| {
+                    let genre_lower = genre.to_lowercase();
+                    EXCLUDED_GENRES.iter().any(|excluded| {
+                        genre_lower.contains(excluded) || excluded.contains(&genre_lower)
+                    })
+                })
+            } else {
+                false
+            };
+            
+            if !should_exclude {
+                tracks.push(SpotifyTrack {
+                    track_name: item.track.name.clone(),
+                    artist: item.track.artists.first().map(|artist| artist.name.clone()).unwrap_or_default(),
+                    album_name: item.track.album.name.clone(),
+                    played_at: item.played_at.clone(),
+                    spotify_url: item.track.external_urls.spotify.clone(),
+                    album_image_url: item.track.album.images.first().map(|image| image.url.clone()),
+                    genres: track_genres,
+                });
+            }
+        }
+        
+        log::info!("Filtered tracks: {} tracks after genre filtering (excluded genres: {:?})", tracks.len(), *EXCLUDED_GENRES);
+        
+        // Update cache with all filtered tracks
         {
             let mut cache_lock = TRACKS_CACHE.lock().unwrap();
             *cache_lock = Some(TracksCacheEntry {
@@ -236,10 +346,13 @@ pub async fn get_recently_played(limit: usize) -> Result<Vec<SpotifyTrack>, Stri
             log::info!("Recently played tracks cache updated");
         }
         
-        let total_time = start_time.elapsed();
-        log::info!("Total get_recently_played took: {:?}", total_time);
+        // Limit the results to the requested number
+        let limited_tracks: Vec<SpotifyTrack> = tracks.into_iter().take(limit).collect();
         
-        Ok(tracks)
+        let total_time = start_time.elapsed();
+        log::info!("Total get_recently_played took: {:?}, returning {} tracks", total_time, limited_tracks.len());
+        
+        Ok(limited_tracks)
     } else {
         let error_text = response.body_string()
             .await

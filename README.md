@@ -119,12 +119,15 @@ Response Format:
       "album_name": "Album Name",
       "played_at": "2023-01-01T12:00:00Z",
       "spotify_url": "https://open.spotify.com/track/id",
-      "album_image_url": "https://i.scdn.co/image/id"
+      "album_image_url": "https://i.scdn.co/image/id",
+      "genres": ["indie rock", "alternative"]
     },
     ...
   ]
 }
 ```
+
+The Spotify endpoint now includes genre information for each track and automatically filters out tracks with excluded genres. By default, "comedy" is excluded. You can customize excluded genres using the `SPOTIFY_EXCLUDED_GENRES` environment variable.
 
 ### Aggregated Endpoint
 
@@ -165,7 +168,8 @@ Response Format:
       "album_name": "Album Name",
       "played_at": "2023-01-01T12:00:00Z",
       "spotify_url": "https://open.spotify.com/track/id",
-      "album_image_url": "https://i.scdn.co/image/id"
+      "album_image_url": "https://i.scdn.co/image/id",
+      "genres": ["indie rock", "alternative"]
     },
     ...
   ]
